@@ -1,0 +1,478 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sự Thật hay Hư Cấu - AI Vision</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- **NÂNG CẤP**: Thêm thư viện marked.js -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Be Vietnam Pro', sans-serif;
+            touch-action: manipulation;
+        }
+        .card-enter {
+            opacity: 0;
+            transform: translateY(20px) scale(0.95);
+        }
+        .card-enter-active {
+            opacity: 1;
+            transform: translateY(0) scale(1);
+            transition: opacity 300ms, transform 300ms;
+        }
+        .feedback-correct {
+            box-shadow: 0 0 15px 5px rgba(34, 197, 94, 0.6);
+        }
+        .feedback-incorrect {
+            box-shadow: 0 0 15px 5px rgba(239, 68, 68, 0.6);
+        }
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 5px solid rgba(0, 0, 0, 0.1);
+            border-left-color: #4f46e5;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        .topic-btn, .level-btn {
+            transition: all 0.2s ease-in-out;
+        }
+        .topic-btn:hover, .level-btn:hover {
+            transform: scale(1.05);
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+        }
+        /* **NÂNG CẤP**: Thêm style cho phần giải thích */
+        #explanation h3 {
+            font-size: 1.1rem;
+            font-weight: 700;
+            margin-bottom: 8px;
+            color: #4f46e5;
+        }
+        .dark #explanation h3 {
+            color: #818cf8;
+        }
+        #explanation ul {
+            list-style-type: disc;
+            padding-left: 20px;
+            margin-top: 8px;
+        }
+        #explanation li {
+            margin-bottom: 4px;
+        }
+        #explanation strong {
+            color: #1e293b;
+        }
+        .dark #explanation strong {
+            color: #cbd5e1;
+        }
+    </style>
+</head>
+<body class="bg-slate-100 dark:bg-slate-900 text-slate-800 dark:text-slate-200 flex items-center justify-center min-h-screen p-4 transition-colors duration-500">
+
+    <div id="game-container" class="w-full max-w-2xl mx-auto">
+        <div id="question-card" class="bg-white dark:bg-slate-800 rounded-2xl shadow-xl p-6 md:p-8 transition-all duration-300">
+            
+            <div id="start-screen" class="text-center">
+                <h1 class="text-3xl md:text-4xl font-bold text-indigo-600 dark:text-indigo-400 mb-2">Sự Thật hay Hư Cấu</h1>
+                <p class="text-slate-600 dark:text-slate-300 mb-8">Trò chơi kiến thức được tạo bởi AI Vision</p>
+                
+                <div id="topic-selection-screen">
+                    <h2 class="text-xl font-semibold mb-6">Bước 1: Chọn một chủ đề</h2>
+                    <div id="topic-selection" class="grid grid-cols-2 md:grid-cols-3 gap-4">
+                        <!-- Các nút chủ đề sẽ được thêm vào đây bằng JavaScript -->
+                    </div>
+                </div>
+
+                <div id="level-selection-screen" class="hidden">
+                    <h2 class="text-xl font-semibold mb-6">Bước 2: Chọn trình độ</h2>
+                    <div class="space-y-4">
+                        <button onclick="selectLevel('easy')" class="level-btn w-full text-lg font-bold py-4 px-6 rounded-lg bg-green-500 text-white">
+                            Cấp 1 <span class="font-normal text-sm block">(6-10 tuổi)</span>
+                        </button>
+                        <button onclick="selectLevel('medium')" class="level-btn w-full text-lg font-bold py-4 px-6 rounded-lg bg-blue-500 text-white">
+                            Phổ thông <span class="font-normal text-sm block">(Mọi lứa tuổi)</span>
+                        </button>
+                        <button onclick="selectLevel('hard')" class="level-btn w-full text-lg font-bold py-4 px-6 rounded-lg bg-red-500 text-white">
+                            Chuyên sâu <span class="font-normal text-sm block">(Thử thách)</span>
+                        </button>
+                    </div>
+                     <button onclick="backToTopicSelection()" class="mt-6 text-sm text-indigo-600 dark:text-indigo-400 hover:underline">&larr; Quay lại chọn chủ đề</button>
+                </div>
+            </div>
+
+            <div id="game-ui" class="hidden">
+                 <div class="flex justify-between items-center mb-4">
+                    <div>
+                        <button onclick="backToMenu()" class="text-sm text-indigo-600 dark:text-indigo-400 hover:underline">&larr; Quay lại</button>
+                        <h1 id="game-title" class="text-xl md:text-2xl font-bold text-indigo-600 dark:text-indigo-400">Chủ đề: Ngẫu nhiên</h1>
+                    </div>
+                    <div id="score" class="text-lg font-semibold bg-slate-200 dark:bg-slate-700 px-4 py-1 rounded-full">Điểm: 0</div>
+                </div>
+                <div class="w-full bg-slate-200 dark:bg-slate-700 rounded-full h-2.5 mb-6">
+                    <div id="progress-bar" class="bg-indigo-500 h-2.5 rounded-full" style="width: 0%"></div>
+                </div>
+                <p id="question-number" class="text-sm text-slate-500 dark:text-slate-400 mb-2 font-medium"></p>
+                
+                <div id="image-container" class="w-full h-48 md:h-64 bg-slate-200 dark:bg-slate-700 rounded-lg mb-4 flex items-center justify-center overflow-hidden">
+                    <div id="image-spinner" class="spinner"></div>
+                    <img id="question-image" src="" alt="Hình ảnh minh họa" class="w-full h-full object-cover hidden transition-opacity duration-500">
+                </div>
+
+                <div id="question-area" class="min-h-[100px] md:min-h-[120px] flex items-center justify-center">
+                    <h2 id="question-text" class="text-xl md:text-2xl text-center font-semibold"></h2>
+                    <div id="loading-spinner" class="spinner hidden"></div>
+                </div>
+                <p id="explanation" class="text-slate-600 dark:text-slate-300 mt-4 p-4 bg-slate-100 dark:bg-slate-700 rounded-lg min-h-[50px] hidden"></p>
+                <div id="button-container" class="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-6">
+                    <button id="true-btn" onclick="checkAnswer(true)" class="w-full text-lg font-bold py-4 px-6 rounded-lg bg-emerald-500 text-white hover:bg-emerald-600">
+                        Sự Thật
+                    </button>
+                    <button id="false-btn" onclick="checkAnswer(false)" class="w-full text-lg font-bold py-4 px-6 rounded-lg bg-rose-500 text-white hover:bg-rose-600">
+                        Hư Cấu
+                    </button>
+                     <button id="next-btn" onclick="goToNextQuestion()" class="hidden sm:col-span-2 w-full text-lg font-bold py-4 px-6 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700">
+                        Câu tiếp theo
+                    </button>
+                </div>
+            </div>
+
+            <div id="final-score" class="text-center hidden">
+                 <h2 id="final-title" class="text-3xl md:text-4xl font-bold mb-4">Hoàn thành!</h2>
+                <p class="text-xl mb-2">Điểm cuối cùng của bạn:</p>
+                <p id="final-score-text" class="text-6xl font-bold text-indigo-600 dark:text-indigo-400 mb-8">0</p>
+                <p id="final-message" class="text-lg mb-8"></p>
+                <button onclick="resetGame()" class="w-full sm:w-auto text-lg font-bold py-4 px-8 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700">
+                    Chơi Lại
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-app.js";
+        import { getAI, getGenerativeModel, GoogleAIBackend } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-ai.js";
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyCP5NyhsqDRIHOMU_GJy7whhg4Yasu2Zpk",
+            authDomain: "aicard-bba97.firebaseapp.com",
+            projectId: "aicard-bba97",
+            storageBucket: "aicard-bba97.firebasestorage.app",
+            messagingSenderId: "1038163475384",
+            appId: "1:1038163475384:web:90809d490543914d546d4d"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        let textModel;
+        try {
+            const ai = getAI(app, { backend: new GoogleAIBackend() });
+            textModel = getGenerativeModel(ai, { model: "gemini-2.0-flash-lite" });
+            console.log("Text Model instance created!");
+        } catch (e) {
+            console.error("Lỗi khi khởi tạo Text Model:", e);
+        }
+        
+        const TOTAL_QUESTIONS_PER_GAME = 10;
+        const topics = [
+            { id: 'random', name: 'Ngẫu nhiên', prompt: 'bất kỳ', color: 'bg-slate-500' },
+            { id: 'space', name: 'Vũ trụ', prompt: 'khoa học vũ trụ, các hành tinh, ngôi sao, thiên hà', color: 'bg-indigo-500' },
+            { id: 'animals', name: 'Động vật', prompt: 'thế giới động vật, các loài vật trên cạn và dưới nước', color: 'bg-green-500' },
+            { id: 'history', name: 'Lịch sử', prompt: 'lịch sử thế giới hoặc lịch sử Việt Nam', color: 'bg-amber-600' },
+            { id: 'tech', name: 'Công nghệ', prompt: 'phát minh công nghệ, máy tính, internet', color: 'bg-sky-500' },
+            { id: 'myth', name: 'Thần thoại', prompt: 'thần thoại Hy Lạp, Ai Cập, hoặc các huyền thoại đô thị', color: 'bg-purple-500' },
+            { id: 'geography', name: 'Địa lý', prompt: 'địa lý thế giới, các quốc gia, sông núi, kỳ quan thiên nhiên', color: 'bg-emerald-500' },
+        ];
+        
+        // **NÂNG CẤP**: Sử dụng "trí nhớ dài hạn"
+        let fullQuestionHistory = [];
+        let generationRetryCount = 0;
+
+        let currentQuestionIndex = 0;
+        let score = 0;
+        let currentQuestion = null;
+        let selectedTopic = topics[0];
+        let selectedLevel = 'medium';
+
+        const startScreen = document.getElementById('start-screen');
+        const topicSelectionScreen = document.getElementById('topic-selection-screen');
+        const levelSelectionScreen = document.getElementById('level-selection-screen');
+        const questionCard = document.getElementById('question-card');
+        const questionText = document.getElementById('question-text');
+        const questionNumberText = document.getElementById('question-number');
+        const scoreText = document.getElementById('score');
+        const explanationText = document.getElementById('explanation');
+        const buttonContainer = document.getElementById('button-container');
+        const progressBar = document.getElementById('progress-bar');
+        const loadingSpinner = document.getElementById('loading-spinner');
+        const gameUI = document.getElementById('game-ui');
+        const finalScoreScreen = document.getElementById('final-score');
+        const finalScoreText = document.getElementById('final-score-text');
+        const finalMessage = document.getElementById('final-message');
+        const topicSelectionContainer = document.getElementById('topic-selection');
+        const gameTitle = document.getElementById('game-title');
+        
+        const trueBtn = document.getElementById('true-btn');
+        const falseBtn = document.getElementById('false-btn');
+        const nextBtn = document.getElementById('next-btn');
+
+        const imageContainer = document.getElementById('image-container');
+        const imageSpinner = document.getElementById('image-spinner');
+        const questionImage = document.getElementById('question-image');
+
+        window.selectTopic = function(topicId) {
+            selectedTopic = topics.find(t => t.id === topicId);
+            topicSelectionScreen.style.display = 'none';
+            levelSelectionScreen.style.display = 'block';
+        }
+        
+        window.selectLevel = function(level) {
+            selectedLevel = level;
+            startScreen.style.display = 'none';
+            gameUI.style.display = 'block';
+            gameTitle.textContent = `Chủ đề: ${selectedTopic.name}`;
+            startGame();
+        }
+        
+        window.backToTopicSelection = function() {
+            levelSelectionScreen.style.display = 'none';
+            topicSelectionScreen.style.display = 'block';
+        }
+
+        window.backToMenu = function() {
+            gameUI.style.display = 'none';
+            finalScoreScreen.style.display = 'none';
+            startScreen.style.display = 'block';
+            levelSelectionScreen.style.display = 'none';
+            topicSelectionScreen.style.display = 'block';
+        }
+
+        async function generateImage(prompt) {
+             try {
+                const payload = {
+                    instances: [{ prompt: `cinematic photo of ${prompt}, professional color grading, high detail` }],
+                    parameters: { "sampleCount": 1 }
+                };
+                const apiKey = "";
+                const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-002:predict?key=${apiKey}`;
+                const response = await fetch(apiUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                const result = await response.json();
+                if (result.predictions && result.predictions[0]?.bytesBase64Encoded) {
+                    const imageUrl = `data:image/png;base64,${result.predictions[0].bytesBase64Encoded}`;
+                    questionImage.src = imageUrl;
+                    questionImage.style.display = 'block';
+                    questionImage.style.opacity = '1';
+                    imageSpinner.style.display = 'none';
+                } else { throw new Error("Không có dữ liệu ảnh trong phản hồi."); }
+            } catch (error) {
+                console.error("Lỗi khi tạo ảnh:", error);
+                imageContainer.style.display = 'none';
+            }
+        }
+
+        async function generateAIQuestion() {
+            if (!textModel) return null;
+            
+            showLoading(true);
+
+            if (generationRetryCount > 4) {
+                console.error("Không thể tạo câu hỏi mới sau nhiều lần thử.");
+                // Có thể hiển thị một thông báo lỗi cho người dùng ở đây
+                questionText.textContent = "Lỗi khi tạo câu hỏi. Vui lòng thử lại.";
+                showLoading(false);
+                return null;
+            }
+
+            let difficultyInstruction = '';
+            switch(selectedLevel) {
+                case 'easy':
+                    difficultyInstruction = 'Câu hỏi phải cực kỳ đơn giản, phù hợp cho trẻ em từ 6-10 tuổi. Sử dụng ngôn ngữ dễ hiểu và các sự thật rất cơ bản.';
+                    break;
+                case 'hard':
+                    difficultyInstruction = 'Câu hỏi phải ở mức độ khó, dành cho chuyên gia, đòi hỏi kiến thức chuyên sâu hoặc về những sự thật ít người biết đến.';
+                    break;
+                case 'medium':
+                default:
+                    difficultyInstruction = 'Câu hỏi ở mức độ kiến thức phổ thông, phù hợp cho mọi lứa tuổi.';
+                    break;
+            }
+
+            const topicPrompt = selectedTopic.id === 'random' 
+                ? topics[Math.floor(Math.random() * (topics.length - 1)) + 1].prompt
+                : selectedTopic.prompt;
+            
+            // **NÂNG CẤP**: Gửi một phần lịch sử gần đây cho AI
+            const recentHistory = fullQuestionHistory.slice(-20);
+            let historyContext = recentHistory.length > 0 ? `Câu hỏi mới phải khác biệt và không lặp lại kiến thức từ những câu sau đây: "${recentHistory.join('", "')}".` : "";
+            
+            const prompt = `Hãy đóng vai một chuyên gia sáng tạo câu đố trí tuệ. Tạo một câu đố 'Sự thật hay Hư cấu' bằng tiếng Việt, câu đố phải thực sự thách thức, xoáy sâu và thông minh.
+Yêu cầu cụ thể:
+1. Nếu là "Hư cấu", hãy tạo một phát biểu dựa trên một lầm tưởng phổ biến hoặc một sự thật bị bóp méo đi một chi tiết nhỏ nhưng quan trọng, khiến nó nghe rất hợp lý nhưng lại sai.
+2. Nếu là "Sự thật", hãy chọn một sự thật gây ngạc nhiên, khó tin, hoặc trái với trực giác thông thường.
+3. Chủ đề: Tập trung sâu vào "${topicPrompt}".
+4. Độ khó: Tuân thủ nghiêm ngặt độ khó sau: "${difficultyInstruction}".
+5. Lịch sử: ${historyContext}
+6. Định dạng: Cung cấp phản hồi dưới dạng một đối tượng JSON duy nhất. JSON phải có các khóa: "statement", "answer" (boolean), "explanation" (string, sử dụng Markdown đơn giản để định dạng cho đẹp mắt, ví dụ: dùng '### Giải thích' cho tiêu đề, **chữ đậm** và các dấu '*' cho danh sách liệt kê), và "image_prompt" (string, một mô tả ngắn gọn, nghệ thuật bằng tiếng Anh để tạo ảnh).`;
+            
+            try {
+                const result = await textModel.generateContent(prompt);
+                const response = result.response;
+                let text = response.text().replace(/```json/g, '').replace(/```/g, '').trim();
+                const questionData = JSON.parse(text);
+
+                if (!questionData.statement || typeof questionData.answer !== 'boolean' || !questionData.explanation || !questionData.image_prompt) {
+                    throw new Error("Định dạng JSON từ AI không hợp lệ.");
+                }
+
+                // **NÂNG CẤP**: Kiểm tra câu hỏi mới với toàn bộ lịch sử
+                if (fullQuestionHistory.includes(questionData.statement)) {
+                    console.warn("AI tạo ra câu hỏi trùng lặp. Đang thử lại...");
+                    generationRetryCount++;
+                    return await generateAIQuestion();
+                }
+                
+                // Nếu câu hỏi là duy nhất
+                generationRetryCount = 0; // Reset bộ đếm
+                fullQuestionHistory.push(questionData.statement);
+                localStorage.setItem('factOrFictionHistory', JSON.stringify(fullQuestionHistory));
+
+                showLoading(false);
+                return questionData;
+            } catch (error) {
+                console.error("Lỗi khi tạo câu hỏi:", error);
+                generationRetryCount++;
+                return await generateAIQuestion(); // Thử lại nếu có lỗi
+            }
+        }
+
+        function showLoading(isLoading) {
+             if (isLoading) {
+                questionText.style.display = 'none';
+                loadingSpinner.style.display = 'block';
+                buttonContainer.style.pointerEvents = 'none';
+                buttonContainer.style.opacity = 0.5;
+                imageContainer.style.display = 'none';
+            } else {
+                questionText.style.display = 'block';
+                loadingSpinner.style.display = 'none';
+                buttonContainer.style.pointerEvents = 'auto';
+                buttonContainer.style.opacity = 1;
+            }
+        }
+
+        async function displayQuestion() {
+            questionCard.classList.remove('card-enter-active', 'feedback-correct', 'feedback-incorrect');
+            questionCard.classList.add('card-enter');
+            
+            explanationText.style.display = 'none';
+            trueBtn.style.display = 'block';
+            falseBtn.style.display = 'block';
+            nextBtn.style.display = 'none';
+            
+            questionImage.style.display = 'none';
+            questionImage.style.opacity = '0';
+            questionImage.src = '';
+            imageContainer.style.display = 'flex';
+            imageSpinner.style.display = 'block';
+
+            currentQuestion = await generateAIQuestion();
+
+            if (currentQuestion) {
+                questionText.textContent = currentQuestion.statement;
+                questionNumberText.textContent = `Câu hỏi ${currentQuestionIndex + 1} trên ${TOTAL_QUESTIONS_PER_GAME}`;
+                progressBar.style.width = `${(currentQuestionIndex / TOTAL_QUESTIONS_PER_GAME) * 100}%`;
+                questionCard.classList.add('card-enter-active');
+
+                generateImage(currentQuestion.image_prompt);
+            }
+        }
+        
+        function startGame() {
+            currentQuestionIndex = 0;
+            score = 0;
+            updateScore();
+            displayQuestion();
+        }
+
+        window.checkAnswer = function(userAnswer) {
+            if (!currentQuestion) return;
+            
+            trueBtn.style.display = 'none';
+            falseBtn.style.display = 'none';
+            nextBtn.style.display = 'block';
+
+            const correct = currentQuestion.answer === userAnswer;
+            if (correct) {
+                score++;
+                questionCard.classList.add('feedback-correct');
+            } else {
+                questionCard.classList.add('feedback-incorrect');
+            }
+            
+            updateScore();
+            showExplanation();
+        }
+
+        window.goToNextQuestion = function() {
+            currentQuestionIndex++;
+            if (currentQuestionIndex < TOTAL_QUESTIONS_PER_GAME) {
+                displayQuestion();
+            } else {
+                showFinalScore();
+            }
+        }
+
+        function showExplanation() {
+            explanationText.innerHTML = marked.parse(currentQuestion.explanation);
+            explanationText.style.display = 'block';
+        }
+
+        function updateScore() {
+            scoreText.innerHTML = `Điểm: ${score}`;
+        }
+        
+        function showFinalScore() {
+            gameUI.style.display = 'none';
+            finalScoreScreen.style.display = 'block';
+            finalScoreText.textContent = score;
+            progressBar.style.width = `100%`;
+            let message = 'Cố gắng hơn nhé! Còn nhiều điều thú vị để khám phá.';
+            const percentage = (score / TOTAL_QUESTIONS_PER_GAME) * 100;
+            if (percentage === 100) message = 'Tuyệt vời! Bạn là một bậc thầy sự thật!';
+            else if (percentage >= 75) message = 'Làm tốt lắm! Kiến thức của bạn thật đáng nể.';
+            else if (percentage >= 50) message = 'Không tệ! Bạn đã phân biệt được khá nhiều sự thật.';
+            finalMessage.textContent = message;
+        }
+
+        window.resetGame = function() {
+            finalScoreScreen.style.display = 'none';
+            backToMenu();
+        }
+
+        function init() {
+            // **NÂNG CẤP**: Tải lịch sử câu hỏi từ localStorage
+            const savedHistory = localStorage.getItem('factOrFictionHistory');
+            if (savedHistory) {
+                fullQuestionHistory = JSON.parse(savedHistory);
+            }
+
+            topics.forEach(topic => {
+                const button = document.createElement('button');
+                button.textContent = topic.name;
+                button.className = `topic-btn w-full text-lg font-bold py-6 px-4 rounded-lg text-white ${topic.color}`;
+                button.onclick = () => selectTopic(topic.id);
+                topicSelectionContainer.appendChild(button);
+            });
+        }
+
+        init();
+    </script>
+</body>
+</html>
+
