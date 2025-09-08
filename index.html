@@ -153,7 +153,7 @@
         const createQuizTool = { functionDeclarations: [{ name: "create_quiz_question", description: "Tạo một câu đố 'Sự thật hay Hư cấu' (Fact or Fiction).", parameters: { type: "OBJECT", properties: { statement: { type: "STRING", description: "Phát biểu của câu đố, để người dùng xác định là đúng hay sai." }, answer: { type: "BOOLEAN", description: "Đáp án đúng, true cho 'Sự thật', false cho 'Hư cấu'." }, explanation: { type: "STRING", description: "Một lời giải thích chi tiết khoảng 2-3 câu, cung cấp bối cảnh và thông tin thú vị liên quan. Sử dụng Markdown đơn giản để định dạng." }, image_prompt: { type: "STRING", description: "Một mô tả ngắn gọn, nghệ thuật bằng tiếng Anh để AI tạo hình ảnh minh họa." } }, required: ["statement", "answer", "explanation", "image_prompt"] } }] };
         try {
             const ai = getAI(app, { backend: new GoogleAIBackend() });
-            textModel = getGenerativeModel(ai, { model: "gemini-2.5-flash", tools: createQuizTool, toolConfig: { functionCallingConfig: { mode: "ANY" } } });
+            textModel = getGenerativeModel(ai, { model: "gemini-2.0-flash-lite", tools: createQuizTool, toolConfig: { functionCallingConfig: { mode: "ANY" } } });
         } catch (e) { console.error("Lỗi khi khởi tạo Text Model:", e); }
         
         const TOTAL_QUESTIONS_PER_GAME = 10;
@@ -495,7 +495,7 @@ ${historyContext}`;
                     break;
             }
 
-            const chatModel = getGenerativeModel(getAI(app,{backend:new GoogleAIBackend}),{model:"gemini-2.5-flash"});
+            const chatModel = getGenerativeModel(getAI(app,{backend:new GoogleAIBackend}),{model:"gemini-2.0-flash-lite"});
             const prompt = `Hãy đóng vai một chuyên gia uyên bác. Dựa trên phát biểu sau: "${currentQuestion.statement}", hãy cung cấp một bài giải thích chi tiết, sâu sắc và thú vị bằng tiếng Việt. ${levelInstruction} Mở rộng từ lời giải thích ngắn gọn ban đầu: "${currentQuestion.explanation}". Sử dụng định dạng Markdown.`;
             try{
                 const result = await chatModel.generateContent(prompt);
