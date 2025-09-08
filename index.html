@@ -121,8 +121,7 @@
         import { initializeApp } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-app.js";
         import { getAI, getGenerativeModel, GoogleAIBackend } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-ai.js";
         import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-auth.js";
-        // **NÂNG CẤP**: Thêm 'documentId' để truy vấn mạnh mẽ hơn
-        import { getFirestore, collection, addDoc, getDocs, query, where, doc, setDoc, serverTimestamp, limit, documentId } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-firestore.js";
+        import { getFirestore, collection, addDoc, getDocs, query, where, doc, setDoc, serverTimestamp, getDoc, increment } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-firestore.js";
 
         const firebaseConfig = {
             apiKey: "AIzaSyDQj9JpV0w3fbfLXWqEaeJ2QkAnnMyeCwU",
@@ -140,11 +139,13 @@
         
         const createQuizTool = { functionDeclarations: [{ name: "create_quiz_question", description: "Tạo một câu đố 'Sự thật hay Hư cấu' (Fact or Fiction).", parameters: { type: "OBJECT", properties: { statement: { type: "STRING", description: "Phát biểu của câu đố, để người dùng xác định là đúng hay sai." }, answer: { type: "BOOLEAN", description: "Đáp án đúng, true cho 'Sự thật', false cho 'Hư cấu'." }, explanation: { type: "STRING", description: "Một lời giải thích chi tiết khoảng 2-3 câu, cung cấp bối cảnh và thông tin thú vị liên quan. Sử dụng Markdown đơn giản để định dạng." }, image_prompt: { type: "STRING", description: "Một mô tả ngắn gọn, nghệ thuật bằng tiếng Anh để AI tạo hình ảnh minh họa." } }, required: ["statement", "answer", "explanation", "image_prompt"] } }] };
         try {
+            // **SỬA LỖI**: Sửa lỗi đánh máy tên model
             const ai = getAI(app, { backend: new GoogleAIBackend() });
-            textModel = getGenerativeModel(ai, { model: "gemini-1.5-flash-latest", tools: createQuizTool, toolConfig: { functionCallingConfig: { mode: "ANY" } } });
+            textModel = getGenerativeModel(ai, { model: "gemini-2.0-flash-lite", tools: createQuizTool, toolConfig: { functionCallingConfig: { mode: "ANY" } } });
         } catch (e) { console.error("Lỗi khi khởi tạo Text Model:", e); }
         
         const TOTAL_QUESTIONS_PER_GAME = 10;
+        const PIONEER_THRESHOLD = 50; // Ngưỡng chất lượng
         const topics = [
             { id: 'random', name: 'Ngẫu nhiên', prompt: 'bất kỳ', color: 'bg-slate-500', subtopics: [] },
             { id: 'space', name: 'Vũ trụ', prompt: 'khoa học vũ trụ', color: 'bg-indigo-500', subtopics: ['Các hành tinh trong Hệ Mặt Trời', 'Lỗ đen và các hiện tượng kỳ lạ', 'Lịch sử du hành vũ trụ', 'Các loại thiên hà và tinh vân', 'Các ngôi sao và vòng đời của chúng'] },
@@ -158,13 +159,13 @@
         let userId = null;
         let userHistory = [];
         let generationRetryCount = 0;
+        let questionCounts = {};
 
         let currentQuestionIndex = 0;
         let score = 0;
         let currentQuestion = null;
         let selectedTopic = topics[0];
         let selectedLevel = 'medium';
-        let sessionSubtopicsUsed = [];
 
         const domElements = {
             authLoadingOverlay: document.getElementById('auth-loading-overlay'),
@@ -197,7 +198,31 @@
             modalContentArea: document.getElementById('modal-content-area')
         };
         
-        // --- CÁC HÀM XỬ LÝ DỮ LIỆU (FIRESTORE & AI) ---
+        async function loadMetadata() {
+            const metadataRef = doc(db, '_metadata', 'questionCounts');
+            try {
+                const docSnap = await getDoc(metadataRef);
+                if (docSnap.exists()) {
+                    questionCounts = docSnap.data();
+                    console.log("Metadata đã tải:", questionCounts);
+                } else {
+                    console.log("Chưa có metadata, sẽ được tạo mới.");
+                }
+            } catch (error) {
+                console.error("Lỗi khi tải metadata:", error);
+            }
+        }
+
+        async function updateQuestionCount(topic, level) {
+            const countKey = `${topic.id}_${level}`;
+            const metadataRef = doc(db, '_metadata', 'questionCounts');
+            try {
+                await setDoc(metadataRef, { [countKey]: increment(1) }, { merge: true });
+                questionCounts[countKey] = (questionCounts[countKey] || 0) + 1;
+            } catch(error) {
+                console.error("Lỗi khi cập nhật bộ đếm:", error);
+            }
+        }
 
         async function loadUserHistory() {
             if (!userId) return;
@@ -206,193 +231,130 @@
             try {
                 const querySnapshot = await getDocs(historyCollectionRef);
                 querySnapshot.forEach(doc => userHistory.push(doc.id));
-                console.log(`Lịch sử người dùng đã tải: ${userHistory.length} câu.`);
-            } catch (error) {
-                console.error("Lỗi khi tải lịch sử người dùng:", error);
-            }
+            } catch (error) { console.error("Lỗi khi tải lịch sử người dùng:", error); }
         }
         
-        async function updateUserHistory(questionId) {
-            if (!userId || !questionId) return;
-            const historyDocRef = doc(db, 'users', userId, 'gameHistory', questionId);
+        async function updateUserHistory(questionId, topicId) {
+            if (!userId || !questionId || !topicId) return;
+            const historyDocId = `${topicId}_${questionId}`;
+            const historyDocRef = doc(db, 'users', userId, 'gameHistory', historyDocId);
             try {
                 await setDoc(historyDocRef, { playedAt: serverTimestamp() });
-                if (!userHistory.includes(questionId)) {
-                    userHistory.push(questionId);
-                }
-            } catch (error) {
-                console.error("Lỗi khi cập nhật lịch sử người dùng:", error);
-            }
+                if (!userHistory.includes(historyDocId)) userHistory.push(historyDocId);
+            } catch (error) { console.error("Lỗi khi cập nhật lịch sử người dùng:", error); }
         }
         
-        // **NÂNG CẤP**: Hàm tạo ID ngẫu nhiên cho truy vấn
-        function generateRandomId() {
-            const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-            let result = '';
-            for (let i = 0; i < 20; i++) {
-                result += chars.charAt(Math.floor(Math.random() * chars.length));
-            }
-            return result;
-        }
-
-        // **NÂNG CẤP**: Truy vấn thông minh và chính xác trên Firestore
-        async function getQuestionFromCache(topic, level, subtopic) {
-            const randomId = generateRandomId();
-            // Firestore 'not-in' chỉ hỗ trợ tối đa 30 giá trị. Ta lấy 30 câu gần nhất.
-            const historyForQuery = userHistory.length > 0 ? userHistory.slice(-30) : ['placeholder'];
-
-            // Xây dựng các điều kiện truy vấn
-            let queryConstraints = [
-                where("topic", "==", topic.id),
-                where("level", "==", level),
-                where("subtopic", "==", subtopic),
-                where(documentId(), ">=", randomId)
-            ];
-
-            if (userHistory.length > 0) {
-                queryConstraints.push(where(documentId(), "not-in", historyForQuery));
-            }
-            
-            let q = query(collection(db, "questions"), ...queryConstraints, limit(1));
-
+        async function getAvailableQuestionIds(topic, level) {
+            const collectionName = `${topic.id}_questions`;
+            const q = query(collection(db, collectionName), where("level", "==", level));
             try {
-                // Thử truy vấn chính với điểm ngẫu nhiên
-                let querySnapshot = await getDocs(q);
-                if (!querySnapshot.empty) {
-                    const doc = querySnapshot.docs[0];
-                    return { id: doc.id, ...doc.data() };
-                }
-
-                // Nếu không tìm thấy, thử truy vấn phụ không có điểm ngẫu nhiên để quét toàn bộ
-                console.log("Cache miss với điểm ngẫu nhiên, thử truy vấn phụ...");
-                queryConstraints.splice(3, 1); // Bỏ điều kiện 'where(documentId(), ">=", randomId)'
-                q = query(collection(db, "questions"), ...queryConstraints, limit(1));
-                querySnapshot = await getDocs(q);
-
-                if (!querySnapshot.empty) {
-                    const doc = querySnapshot.docs[0];
-                    return { id: doc.id, ...doc.data() };
-                }
-                
-                return null; // Không tìm thấy câu hỏi phù hợp trong cache
-
-            } catch (error) {
-                console.error("Lỗi khi lấy câu hỏi từ cache:", error);
-                return null;
-            }
+                const querySnapshot = await getDocs(q);
+                return querySnapshot.docs.map(doc => doc.id);
+            } catch (error) { return []; }
         }
 
-        async function generateWithAI(topic, level, subtopic) {
+        async function isQuestionDuplicate(statement, topic) {
+            const collectionName = `${topic.id}_questions`;
+            const q = query(collection(db, collectionName), where("statement", "==", statement));
+            const querySnapshot = await getDocs(q);
+            return !querySnapshot.empty;
+        }
+
+        async function generateWithAI(topic, level) {
             let difficultyInstruction = '';
             switch(level) {
-                case 'easy': difficultyInstruction = 'Câu hỏi phải cực kỳ đơn giản, phù hợp cho trẻ em 6-10 tuổi. Tập trung vào các đặc điểm rất cơ bản, dễ nhận biết (ví dụ: màu sắc, hình dạng, âm thanh, chức năng chính). Câu hỏi phải cực kỳ rõ ràng, không có từ ngữ trừu tượng.'; break;
-                case 'hard': difficultyInstruction = 'Câu hỏi phải ở mức độ khó, dành cho người có kiến thức chuyên sâu. Câu hỏi nên chứa các chi tiết cụ thể, số liệu, tên riêng, hoặc các sự thật ít được biết đến trong giới chuyên môn. Câu hỏi có thể mang tính lắt léo, dựa trên một chi tiết nhỏ nhưng quan trọng.'; break;
-                default: difficultyInstruction = 'Câu hỏi ở mức độ kiến thức phổ thông, phù hợp với mọi lứa tuổi, có thể liên quan đến các sự thật thú vị mà nhiều người có thể đã nghe qua nhưng không chắc chắn.'; break;
+                case 'easy': difficultyInstruction = 'Câu hỏi phải cực kỳ đơn giản, phù hợp cho trẻ em 6-10 tuổi.'; break;
+                case 'hard': difficultyInstruction = 'Câu hỏi phải ở mức độ khó, dành cho người có kiến thức chuyên sâu.'; break;
+                default: difficultyInstruction = 'Câu hỏi ở mức độ kiến thức phổ thông, phù hợp với mọi lứa tuổi.'; break;
             }
-            
-            const subtopicInstruction = `Hãy tập trung sâu vào khía cạnh sau: "${subtopic}".`;
-            const historyContext = userHistory.length > 0 ? `Quan trọng: Câu hỏi mới phải hoàn toàn khác biệt, không được lặp lại ý tưởng hay kiến thức từ những câu đã có trong lịch sử.` : "Đây là câu hỏi đầu tiên.";
-
-            const prompt = `Hãy đóng vai một chuyên gia biên soạn nội dung cho một chương trình đố vui khoa học nổi tiếng. Nhiệm vụ của bạn là tạo một câu đố 'Sự thật hay Hư cấu' bằng tiếng Việt, đảm bảo tính chính xác, hấp dẫn và thách thức.
-Yêu cầu cụ thể:
-1.  Chủ đề chính: "${topic.prompt}".
-2.  ${subtopicInstruction}
-3.  Tuân thủ nghiêm ngặt độ khó sau: "${difficultyInstruction}".
-4.  Mỗi câu hỏi phải được kiểm chứng, chính xác và khai thác một khía cạnh độc đáo, một sự thật ít người biết hoặc một lầm tưởng tinh vi.
-5.  ${historyContext}`;
-            
+            const historyForAI = userHistory.map(h => h.split('_')[1]);
+            const historyContext = historyForAI.length > 0 ? `Quan trọng: Câu hỏi mới phải hoàn toàn khác biệt với những câu đã có trong lịch sử.` : "";
+            const prompt = `Tạo một câu đố 'Sự thật hay Hư cấu' bằng tiếng Việt. Chủ đề: "${topic.prompt}". Độ khó: "${difficultyInstruction}". ${historyContext}`;
             try {
                 const result = await textModel.generateContent(prompt);
                 const functionCalls = result.response.functionCalls();
-                if (functionCalls && functionCalls[0]?.name === "create_quiz_question") {
-                    return functionCalls[0].args;
-                }
-                throw new Error("AI không gọi hàm như mong đợi.");
-            } catch (error) {
-                console.error("Lỗi khi AI tạo câu hỏi:", error);
-                return null;
-            }
-        }
-
-        async function saveQuestionToCache(questionData, topic, level, subtopic) {
-            try {
-                const docRef = await addDoc(collection(db, "questions"), {
-                    ...questionData,
-                    topic: topic.id,
-                    level: level,
-                    subtopic: subtopic,
-                    createdAt: serverTimestamp()
-                });
-                return docRef.id;
-            } catch (error) {
-                console.error("Lỗi khi lưu câu hỏi vào cache:", error);
-                return null;
-            }
+                if (functionCalls && functionCalls[0]?.name === "create_quiz_question") return functionCalls[0].args;
+                throw new Error("AI không gọi hàm.");
+            } catch (error) { console.error("Lỗi khi AI tạo câu hỏi:", error); return null; }
         }
         
+        async function saveQuestionToCache(questionData, topic, level) {
+            const collectionName = `${topic.id}_questions`;
+            try {
+                const docRef = await addDoc(collection(db, collectionName), { ...questionData, level: level, createdAt: serverTimestamp() });
+                return docRef.id;
+            } catch (error) { console.error(`Lỗi khi lưu câu hỏi:`, error); return null; }
+        }
+        
+        async function generateUniqueAIQuestion(topic, level) {
+             console.log("Chế độ Người Tiên Phong: Đang tạo câu hỏi độc nhất...");
+             let uniqueQuestionData = null;
+             let newId = null;
+             let attempts = 0;
+             while(attempts < 5 && !uniqueQuestionData) {
+                 attempts++;
+                 const aiData = await generateWithAI(topic, level);
+                 if (aiData) {
+                     const isDuplicate = await isQuestionDuplicate(aiData.statement, topic);
+                     if (!isDuplicate) {
+                         newId = await saveQuestionToCache(aiData, topic, level);
+                         if (newId) {
+                            await updateQuestionCount(topic, level);
+                            uniqueQuestionData = { id: newId, topicId: topic.id, ...aiData };
+                         }
+                     } else {
+                         console.warn("AI đã tạo câu hỏi trùng lặp, đang thử lại...");
+                     }
+                 }
+             }
+             return uniqueQuestionData;
+        }
+
         async function fetchNextQuestion() {
             showLoading(true);
             const currentTopic = selectedTopic.id === 'random' ? topics[Math.floor(Math.random() * (topics.length - 1)) + 1] : selectedTopic;
             
-            let availableSubtopics = currentTopic.subtopics.filter(st => !sessionSubtopicsUsed.includes(st));
-            if (availableSubtopics.length === 0 && currentTopic.subtopics.length > 0) {
-                sessionSubtopicsUsed = []; 
-                availableSubtopics = currentTopic.subtopics;
+            const countKey = `${currentTopic.id}_${selectedLevel}`;
+            const currentCount = questionCounts[countKey] || 0;
+
+            if (currentCount < PIONEER_THRESHOLD) {
+                const question = await generateUniqueAIQuestion(currentTopic, selectedLevel);
+                 if (question) {
+                     showLoading(false);
+                     return question;
+                 }
+                 console.warn("Không thể tạo câu hỏi độc nhất, chuyển về chế độ Kế Thừa.");
             }
             
-            const randomSubtopic = availableSubtopics.length > 0 ? availableSubtopics[Math.floor(Math.random() * availableSubtopics.length)] : 'general';
-
-            let question = await getQuestionFromCache(currentTopic, selectedLevel, randomSubtopic);
-            if (question) {
-                console.log(`Tìm thấy câu hỏi trong cache cho chủ đề con: "${randomSubtopic}" (ID: ${question.id})`);
-                sessionSubtopicsUsed.push(randomSubtopic);
+            const allAvailableIds = await getAvailableQuestionIds(currentTopic, selectedLevel);
+            const playedIdsForTopic = userHistory.filter(id => id.startsWith(`${currentTopic.id}_`)).map(id => id.split('_')[1]);
+            const unseenIds = allAvailableIds.filter(id => !playedIdsForTopic.includes(id));
+            
+            if (unseenIds.length > 0) {
+                const randomId = unseenIds[Math.floor(Math.random() * unseenIds.length)];
+                const questionDocRef = doc(db, `${currentTopic.id}_questions`, randomId);
+                const docSnap = await getDoc(questionDocRef);
+                if (docSnap.exists()) {
+                    console.log(`Chế độ Kế Thừa: Lấy câu hỏi từ cache: ${currentTopic.id}/${randomId}`);
+                    showLoading(false);
+                    return { id: docSnap.id, topicId: currentTopic.id, ...docSnap.data() };
+                }
+            }
+            
+            const question = await generateUniqueAIQuestion(currentTopic, selectedLevel);
+            if(question) {
                 showLoading(false);
                 return question;
             }
 
-            console.log(`Không có câu hỏi cache cho "${randomSubtopic}", đang tạo mới...`);
-            if (generationRetryCount > 4) {
-                domElements.questionText.textContent = "Lỗi khi tạo câu hỏi. Vui lòng thử lại.";
-                showLoading(false);
-                return null;
-            }
-
-            const newQuestionData = await generateWithAI(currentTopic, selectedLevel, randomSubtopic);
-            if (newQuestionData) {
-                const newId = await saveQuestionToCache(newQuestionData, currentTopic, selectedLevel, randomSubtopic);
-                if (newId) {
-                    generationRetryCount = 0;
-                    sessionSubtopicsUsed.push(randomSubtopic);
-                    showLoading(false);
-                    return { id: newId, ...newQuestionData };
-                }
-            }
-
-            generationRetryCount++;
-            return await fetchNextQuestion();
+            domElements.questionText.textContent = "Không thể tải câu hỏi. Vui lòng thử lại.";
+            showLoading(false);
+            return null;
         }
         
-        async function generateImage(prompt) {
-           domElements.imageContainer.style.display = 'none';
-        }
-
-        async function generateDetailedExplanation() {
-             if (!textModel || !currentQuestion) return null;
-            const chatModel = getGenerativeModel(getAI(app, { backend: new GoogleAIBackend() }), { model: "gemini-1.5-flash-latest" });
-            const prompt = `Hãy đóng vai một chuyên gia uyên bác. Dựa trên phát biểu sau: "${currentQuestion.statement}", hãy cung cấp một bài giải thích chi tiết, sâu sắc và thú vị bằng tiếng Việt. Mở rộng từ lời giải thích ngắn gọn ban đầu: "${currentQuestion.explanation}". Đi sâu vào chi tiết, bối cảnh, hoặc các khái niệm khoa học liên quan. Sử dụng định dạng Markdown.`;
-            try {
-                const result = await chatModel.generateContent(prompt);
-                return result.response.text();
-            } catch (error) {
-                console.error("Lỗi khi tạo giải thích chi tiết:", error);
-                return null;
-            }
-        }
-
-        // --- CÁC HÀM XỬ LÝ GIAO DIỆN (UI) ---
-        
+        // **SỬA LỖI**: Thêm lại hàm showLoading bị thiếu
         function showLoading(isLoading) {
-             if (isLoading) {
+            if (isLoading) {
                 domElements.questionText.style.display = 'none';
                 domElements.loadingSpinner.style.display = 'block';
                 domElements.buttonContainer.style.pointerEvents = 'none';
@@ -420,98 +382,35 @@ Yêu cầu cụ thể:
                 domElements.questionNumberText.textContent = `Câu hỏi ${currentQuestionIndex + 1} trên ${TOTAL_QUESTIONS_PER_GAME}`;
                 domElements.progressBar.style.width = `${((currentQuestionIndex + 1) / TOTAL_QUESTIONS_PER_GAME) * 100}%`;
                 domElements.questionCard.classList.add('card-enter-active');
-                generateImage(currentQuestion.image_prompt);
-                updateUserHistory(currentQuestion.id);
+                updateUserHistory(currentQuestion.id, currentQuestion.topicId);
             }
         }
-        
         function startGame() {
             currentQuestionIndex = 0;
             score = 0;
-            sessionSubtopicsUsed = []; 
             updateScore();
             displayQuestion();
         }
-
-        window.checkAnswer = function(userAnswer) {
-            if (!currentQuestion) return;
-            domElements.trueBtn.style.display = 'none';
-            domElements.falseBtn.style.display = 'none';
-            domElements.nextBtn.style.display = 'block';
-            const correct = currentQuestion.answer === userAnswer;
-            if (correct) {
-                score++;
-                domElements.questionCard.classList.add('feedback-correct');
-            } else {
-                domElements.questionCard.classList.add('feedback-incorrect');
-            }
-            updateScore();
-            showExplanation();
-        };
-
-        window.goToNextQuestion = function() {
-            currentQuestionIndex++;
-            if (currentQuestionIndex < TOTAL_QUESTIONS_PER_GAME) {
-                displayQuestion();
-            } else {
-                showFinalScore();
-            }
-        };
-
-        function showExplanation() {
-            const resultText = currentQuestion.answer === true
-                ? "### ✅ Đúng vậy, đó là Sự thật!"
-                : "### ❌ Chính xác, đó là Hư cấu!";
-            const fullExplanation = `${resultText}\n\n${currentQuestion.explanation}`;
-            domElements.explanationContent.innerHTML = marked.parse(fullExplanation);
-            domElements.explanationContainer.style.display = 'block';
-        };
-
-        function updateScore() {
-            domElements.scoreText.innerHTML = `Điểm: ${score}`;
-        };
-
-        function showFinalScore() {
-            domElements.gameUI.style.display = 'none';
-            domElements.finalScoreScreen.style.display = 'block';
-            domElements.finalScoreText.textContent = score;
-            let message = 'Cố gắng hơn nhé! Còn nhiều điều thú vị để khám phá.';
-            const percentage = (score / TOTAL_QUESTIONS_PER_GAME) * 100;
-            if (percentage === 100) message = 'Tuyệt vời! Bạn là một bậc thầy sự thật!';
-            else if (percentage >= 75) message = 'Làm tốt lắm! Kiến thức của bạn thật đáng nể.';
-            else if (percentage >= 50) message = 'Không tệ! Bạn đã phân biệt được khá nhiều sự thật.';
-            domElements.finalMessage.textContent = message;
-        };
-
-        window.resetGame = function() {
-            domElements.finalScoreScreen.style.display = 'none';
-            backToMenu();
-        };
-        
-        // --- KHỞI TẠO ỨNG DỤNG ---
-
         function initAuth() {
             onAuthStateChanged(auth, async (user) => {
                 if (user) {
                     userId = user.uid;
-                    console.log("Người dùng đã đăng nhập ẩn danh:", userId);
                     await loadUserHistory();
+                    await loadMetadata();
                 } else {
                     try {
                         const userCredential = await signInAnonymously(auth);
                         userId = userCredential.user.uid;
-                        console.log("Tài khoản ẩn danh mới đã được tạo:", userId);
                         await loadUserHistory();
+                        await loadMetadata();
                     } catch (error) {
-                        console.error("Lỗi khi đăng nhập ẩn danh:", error);
-                        domElements.authLoadingOverlay.innerHTML = '<p class="text-red-500 font-semibold">Lỗi kết nối. Vui lòng tải lại trang.</p>';
+                        domElements.authLoadingOverlay.innerHTML = '<p class="text-red-500 font-semibold">Lỗi kết nối.</p>';
                         return;
                     }
                 }
                 domElements.authLoadingOverlay.style.display = 'none';
             });
         }
-
         function init() {
             topics.forEach(topic => {
                 const button = document.createElement('button');
@@ -523,35 +422,26 @@ Yêu cầu cụ thể:
             domElements.learnMoreModal.addEventListener('click', (event) => {
                 if (event.target === domElements.learnMoreModal) closeLearnMoreModal();
             });
-            
             initAuth();
         }
-        
-        // Gán các hàm vào window để HTML có thể gọi
+        window.backToMenu = () => {
+            domElements.gameUI.style.display = 'none';
+            domElements.finalScoreScreen.style.display = 'none';
+            domElements.startScreen.style.display = 'block';
+            domElements.levelSelectionScreen.style.display = 'none';
+            domElements.topicSelectionScreen.style.display = 'block';
+        };
         window.selectTopic = (id) => { selectedTopic = topics.find(t => t.id === id); domElements.topicSelectionScreen.style.display = 'none'; domElements.levelSelectionScreen.style.display = 'block'; };
         window.selectLevel = (level) => { selectedLevel = level; domElements.startScreen.style.display = 'none'; domElements.gameUI.style.display = 'block'; domElements.gameTitle.textContent = `Chủ đề: ${selectedTopic.name}`; startGame(); };
         window.backToTopicSelection = () => { domElements.levelSelectionScreen.style.display = 'none'; domElements.topicSelectionScreen.style.display = 'block'; };
-        window.backToMenu = () => { domElements.gameUI.style.display = 'none'; domElements.finalScoreScreen.style.display = 'none'; domElements.startScreen.style.display = 'block'; domElements.levelSelectionScreen.style.display = 'none'; domElements.topicSelectionScreen.style.display = 'block'; };
-        window.openLearnMoreModal = async () => {
-            domElements.learnMoreModal.classList.add('active');
-            domElements.modalContentArea.innerHTML = ''; 
-            domElements.modalSpinner.style.display = 'flex';
-            const detailedExplanation = await generateDetailedExplanation();
-            domElements.modalSpinner.style.display = 'none';
-            if (detailedExplanation) {
-                domElements.modalContentArea.innerHTML = marked.parse(detailedExplanation);
-            } else {
-                domElements.modalContentArea.innerHTML = `
-                    <div class="text-center">
-                        <p class="text-red-500 font-semibold">Rất tiếc, không thể tạo nội dung.</p>
-                        <p class="text-sm text-slate-500 dark:text-slate-400 mt-1">Đã có lỗi xảy ra trong quá trình xử lý. Vui lòng thử lại.</p>
-                        <button onclick="openLearnMoreModal()" class="mt-4 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 text-sm font-semibold">
-                            Thử lại
-                        </button>
-                    </div>
-                `;
-            }
-        };
+        window.resetGame = function() { domElements.finalScoreScreen.style.display = 'none'; backToMenu(); };
+        window.checkAnswer = function(userAnswer){if(!currentQuestion)return;domElements.trueBtn.style.display='none';domElements.falseBtn.style.display='none';domElements.nextBtn.style.display='block';const t=currentQuestion.answer===userAnswer;t?(score++,domElements.questionCard.classList.add("feedback-correct")):domElements.questionCard.classList.add("feedback-incorrect"),updateScore(),showExplanation()};
+        window.goToNextQuestion = function(){currentQuestionIndex++,currentQuestionIndex<TOTAL_QUESTIONS_PER_GAME?displayQuestion():showFinalScore()};
+        function showExplanation(){const e=currentQuestion.answer===!0?"### ✅ Đúng vậy, đó là Sự thật!":"### ❌ Chính xác, đó là Hư cấu!",t=`${e}\n\n${currentQuestion.explanation}`;domElements.explanationContent.innerHTML=marked.parse(t),domElements.explanationContainer.style.display="block"}
+        function updateScore(){domElements.scoreText.innerHTML=`Điểm: ${score}`}
+        function showFinalScore(){domElements.gameUI.style.display="none",domElements.finalScoreScreen.style.display="block",domElements.finalScoreText.textContent=score;let e="Cố gắng hơn nhé! Còn nhiều điều thú vị để khám phá.";const t=score/TOTAL_QUESTIONS_PER_GAME*100;100===t?e="Tuyệt vời! Bạn là một bậc thầy sự thật!":t>=75?e="Làm tốt lắm! Kiến thức của bạn thật đáng nể.":t>=50&&(e="Không tệ! Bạn đã phân biệt được khá nhiều sự thật."),domElements.finalMessage.textContent=e}
+        window.openLearnMoreModal=async()=>{domElements.learnMoreModal.classList.add("active"),domElements.modalContentArea.innerHTML="",domElements.modalSpinner.style.display="flex";const e=await generateDetailedExplanation();domElements.modalSpinner.style.display="none",e?domElements.modalContentArea.innerHTML=marked.parse(e):domElements.modalContentArea.innerHTML=`\n                    <div class="text-center">\n                        <p class="text-red-500 font-semibold">Rất tiếc, không thể tạo nội dung.</p>\n                        <p class="text-sm text-slate-500 dark:text-slate-400 mt-1">Đã có lỗi xảy ra trong quá trình xử lý. Vui lòng thử lại.</p>\n                        <button onclick="openLearnMoreModal()" class="mt-4 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 text-sm font-semibold">\n                            Thử lại\n                        </button>\n                    </div>\n                `};
+        async function generateDetailedExplanation(){if(!textModel||!currentQuestion)return null;const e=getGenerativeModel(getAI(app,{backend:new GoogleAIBackend}),{model:"gemini-2.0-flash-lite"}),t=`Hãy đóng vai một chuyên gia uyên bác. Dựa trên phát biểu sau: "${currentQuestion.statement}", hãy cung cấp một bài giải thích chi tiết, sâu sắc và thú vị bằng tiếng Việt. Mở rộng từ lời giải thích ngắn gọn ban đầu: "${currentQuestion.explanation}". Đi sâu vào chi tiết, bối cảnh, hoặc các khái niệm khoa học liên quan. Sử dụng định dạng Markdown.`;try{const n=await e.generateContent(t);return n.response.text()}catch(n){return console.error("Lỗi khi tạo giải thích chi tiết:",n),null}}
         window.closeLearnMoreModal = () => domElements.learnMoreModal.classList.remove('active');
 
         init();
