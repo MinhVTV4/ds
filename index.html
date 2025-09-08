@@ -34,6 +34,19 @@
         .dark .modal-close-btn { background: #334155; }
         .modal-close-btn:hover { background: #cbd5e1; }
         .dark .modal-close-btn:hover { background: #475569; }
+
+        /* **NÂNG CẤP**: Thêm màu sắc cho modal */
+        .modal-content { background-color: #f8fafc; }
+        .dark .modal-content { background-color: #1e293b; }
+        .modal-content .markdown-content p { color: #334155; line-height: 1.6; }
+        .dark .modal-content .markdown-content p { color: #cbd5e1; }
+        .modal-content .markdown-content h3 { color: #4338ca; border-bottom: 2px solid #c7d2fe; padding-bottom: 4px; margin-top: 16px; }
+        .dark .modal-content .markdown-content h3 { color: #a5b4fc; border-bottom-color: #4f46e5; }
+        .modal-content .markdown-content strong { color: #4f46e5; }
+        .dark .modal-content .markdown-content strong { color: #c7d2fe; }
+        .modal-content .markdown-content ul { list-style-position: inside; }
+        .modal-content .markdown-content li { color: #475569; margin-bottom: 8px; }
+        .dark .modal-content .markdown-content li { color: #94a3b8; }
     </style>
 </head>
 <body class="bg-slate-100 dark:bg-slate-900 text-slate-800 dark:text-slate-200 flex items-center justify-center min-h-screen p-4 transition-colors duration-500">
@@ -139,13 +152,12 @@
         
         const createQuizTool = { functionDeclarations: [{ name: "create_quiz_question", description: "Tạo một câu đố 'Sự thật hay Hư cấu' (Fact or Fiction).", parameters: { type: "OBJECT", properties: { statement: { type: "STRING", description: "Phát biểu của câu đố, để người dùng xác định là đúng hay sai." }, answer: { type: "BOOLEAN", description: "Đáp án đúng, true cho 'Sự thật', false cho 'Hư cấu'." }, explanation: { type: "STRING", description: "Một lời giải thích chi tiết khoảng 2-3 câu, cung cấp bối cảnh và thông tin thú vị liên quan. Sử dụng Markdown đơn giản để định dạng." }, image_prompt: { type: "STRING", description: "Một mô tả ngắn gọn, nghệ thuật bằng tiếng Anh để AI tạo hình ảnh minh họa." } }, required: ["statement", "answer", "explanation", "image_prompt"] } }] };
         try {
-            // **SỬA LỖI**: Sửa lỗi đánh máy tên model
             const ai = getAI(app, { backend: new GoogleAIBackend() });
-            textModel = getGenerativeModel(ai, { model: "gemini-2.0-flash-lite", tools: createQuizTool, toolConfig: { functionCallingConfig: { mode: "ANY" } } });
+            textModel = getGenerativeModel(ai, { model: "gemini-2.5-flash", tools: createQuizTool, toolConfig: { functionCallingConfig: { mode: "ANY" } } });
         } catch (e) { console.error("Lỗi khi khởi tạo Text Model:", e); }
         
         const TOTAL_QUESTIONS_PER_GAME = 10;
-        const PIONEER_THRESHOLD = 50; // Ngưỡng chất lượng
+        const PIONEER_THRESHOLD = 50;
         const topics = [
             { id: 'random', name: 'Ngẫu nhiên', prompt: 'bất kỳ', color: 'bg-slate-500', subtopics: [] },
             { id: 'space', name: 'Vũ trụ', prompt: 'khoa học vũ trụ', color: 'bg-indigo-500', subtopics: ['Các hành tinh trong Hệ Mặt Trời', 'Lỗ đen và các hiện tượng kỳ lạ', 'Lịch sử du hành vũ trụ', 'Các loại thiên hà và tinh vân', 'Các ngôi sao và vòng đời của chúng'] },
@@ -204,13 +216,8 @@
                 const docSnap = await getDoc(metadataRef);
                 if (docSnap.exists()) {
                     questionCounts = docSnap.data();
-                    console.log("Metadata đã tải:", questionCounts);
-                } else {
-                    console.log("Chưa có metadata, sẽ được tạo mới.");
                 }
-            } catch (error) {
-                console.error("Lỗi khi tải metadata:", error);
-            }
+            } catch (error) { console.error("Lỗi khi tải metadata:", error); }
         }
 
         async function updateQuestionCount(topic, level) {
@@ -219,9 +226,7 @@
             try {
                 await setDoc(metadataRef, { [countKey]: increment(1) }, { merge: true });
                 questionCounts[countKey] = (questionCounts[countKey] || 0) + 1;
-            } catch(error) {
-                console.error("Lỗi khi cập nhật bộ đếm:", error);
-            }
+            } catch(error) { console.error("Lỗi khi cập nhật bộ đếm:", error); }
         }
 
         async function loadUserHistory() {
@@ -261,15 +266,24 @@
         }
 
         async function generateWithAI(topic, level) {
-            let difficultyInstruction = '';
+            let levelDescription = '';
             switch(level) {
-                case 'easy': difficultyInstruction = 'Câu hỏi phải cực kỳ đơn giản, phù hợp cho trẻ em 6-10 tuổi.'; break;
-                case 'hard': difficultyInstruction = 'Câu hỏi phải ở mức độ khó, dành cho người có kiến thức chuyên sâu.'; break;
-                default: difficultyInstruction = 'Câu hỏi ở mức độ kiến thức phổ thông, phù hợp với mọi lứa tuổi.'; break;
+                case 'easy': levelDescription = 'dễ, phù hợp cho trẻ em 6-10 tuổi'; break;
+                case 'hard': levelDescription = 'khó, dành cho người có kiến thức chuyên sâu'; break;
+                default: levelDescription = 'phổ thông, phù hợp với mọi lứa tuổi'; break;
             }
             const historyForAI = userHistory.map(h => h.split('_')[1]);
-            const historyContext = historyForAI.length > 0 ? `Quan trọng: Câu hỏi mới phải hoàn toàn khác biệt với những câu đã có trong lịch sử.` : "";
-            const prompt = `Tạo một câu đố 'Sự thật hay Hư cấu' bằng tiếng Việt. Chủ đề: "${topic.prompt}". Độ khó: "${difficultyInstruction}". ${historyContext}`;
+            const historyContext = historyForAI.length > 0 ? `5. **Tuyệt đối không** được lặp lại ý tưởng hay kiến thức từ những câu đã có trong lịch sử.` : "";
+
+            const prompt = `Hãy đóng vai một chuyên gia biên soạn nội dung cho một chương trình đố vui khoa học nổi tiếng. Nhiệm vụ của bạn là tạo ra một câu đố 'Sự thật hay Hư cấu' bằng tiếng Việt, đảm bảo tính chính xác, hấp dẫn, và thách thức ở mức độ ${levelDescription}.
+
+**Quy tắc bắt buộc:**
+1.  **Tránh xa những sự thật quá hiển nhiên, ai cũng biết** (ví dụ: Trái đất hình cầu, nước sôi ở 100 độ C).
+2.  Nếu câu trả lời là **"Hư cấu"**, phát biểu phải được xây dựng dựa trên một lầm tưởng phổ biến hoặc một sự thật bị bóp méo đi một chi tiết nhỏ nhưng quan trọng, khiến nó nghe cực kỳ hợp lý nhưng lại sai.
+3.  Nếu câu trả lời là **"Sự thật"**, phát biểu phải đề cập đến một sự thật gây ngạc nhiên, khó tin, hoặc trái với trực giác thông thường của đa số mọi người.
+4.  Chủ đề chính: "${topic.prompt}".
+${historyContext}`;
+            
             try {
                 const result = await textModel.generateContent(prompt);
                 const functionCalls = result.response.functionCalls();
@@ -352,7 +366,6 @@
             return null;
         }
         
-        // **SỬA LỖI**: Thêm lại hàm showLoading bị thiếu
         function showLoading(isLoading) {
             if (isLoading) {
                 domElements.questionText.style.display = 'none';
@@ -424,6 +437,13 @@
             });
             initAuth();
         }
+        
+        const levelNames = { 
+            easy: 'Cấp 1', 
+            medium: 'Phổ thông', 
+            hard: 'Chuyên sâu' 
+        };
+
         window.backToMenu = () => {
             domElements.gameUI.style.display = 'none';
             domElements.finalScoreScreen.style.display = 'none';
@@ -432,7 +452,13 @@
             domElements.topicSelectionScreen.style.display = 'block';
         };
         window.selectTopic = (id) => { selectedTopic = topics.find(t => t.id === id); domElements.topicSelectionScreen.style.display = 'none'; domElements.levelSelectionScreen.style.display = 'block'; };
-        window.selectLevel = (level) => { selectedLevel = level; domElements.startScreen.style.display = 'none'; domElements.gameUI.style.display = 'block'; domElements.gameTitle.textContent = `Chủ đề: ${selectedTopic.name}`; startGame(); };
+        window.selectLevel = (level) => { 
+            selectedLevel = level; 
+            domElements.startScreen.style.display = 'none'; 
+            domElements.gameUI.style.display = 'block'; 
+            domElements.gameTitle.textContent = `Chủ đề: ${selectedTopic.name} - ${levelNames[level]}`; 
+            startGame(); 
+        };
         window.backToTopicSelection = () => { domElements.levelSelectionScreen.style.display = 'none'; domElements.topicSelectionScreen.style.display = 'block'; };
         window.resetGame = function() { domElements.finalScoreScreen.style.display = 'none'; backToMenu(); };
         window.checkAnswer = function(userAnswer){if(!currentQuestion)return;domElements.trueBtn.style.display='none';domElements.falseBtn.style.display='none';domElements.nextBtn.style.display='block';const t=currentQuestion.answer===userAnswer;t?(score++,domElements.questionCard.classList.add("feedback-correct")):domElements.questionCard.classList.add("feedback-incorrect"),updateScore(),showExplanation()};
@@ -440,8 +466,44 @@
         function showExplanation(){const e=currentQuestion.answer===!0?"### ✅ Đúng vậy, đó là Sự thật!":"### ❌ Chính xác, đó là Hư cấu!",t=`${e}\n\n${currentQuestion.explanation}`;domElements.explanationContent.innerHTML=marked.parse(t),domElements.explanationContainer.style.display="block"}
         function updateScore(){domElements.scoreText.innerHTML=`Điểm: ${score}`}
         function showFinalScore(){domElements.gameUI.style.display="none",domElements.finalScoreScreen.style.display="block",domElements.finalScoreText.textContent=score;let e="Cố gắng hơn nhé! Còn nhiều điều thú vị để khám phá.";const t=score/TOTAL_QUESTIONS_PER_GAME*100;100===t?e="Tuyệt vời! Bạn là một bậc thầy sự thật!":t>=75?e="Làm tốt lắm! Kiến thức của bạn thật đáng nể.":t>=50&&(e="Không tệ! Bạn đã phân biệt được khá nhiều sự thật."),domElements.finalMessage.textContent=e}
-        window.openLearnMoreModal=async()=>{domElements.learnMoreModal.classList.add("active"),domElements.modalContentArea.innerHTML="",domElements.modalSpinner.style.display="flex";const e=await generateDetailedExplanation();domElements.modalSpinner.style.display="none",e?domElements.modalContentArea.innerHTML=marked.parse(e):domElements.modalContentArea.innerHTML=`\n                    <div class="text-center">\n                        <p class="text-red-500 font-semibold">Rất tiếc, không thể tạo nội dung.</p>\n                        <p class="text-sm text-slate-500 dark:text-slate-400 mt-1">Đã có lỗi xảy ra trong quá trình xử lý. Vui lòng thử lại.</p>\n                        <button onclick="openLearnMoreModal()" class="mt-4 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 text-sm font-semibold">\n                            Thử lại\n                        </button>\n                    </div>\n                `};
-        async function generateDetailedExplanation(){if(!textModel||!currentQuestion)return null;const e=getGenerativeModel(getAI(app,{backend:new GoogleAIBackend}),{model:"gemini-2.0-flash-lite"}),t=`Hãy đóng vai một chuyên gia uyên bác. Dựa trên phát biểu sau: "${currentQuestion.statement}", hãy cung cấp một bài giải thích chi tiết, sâu sắc và thú vị bằng tiếng Việt. Mở rộng từ lời giải thích ngắn gọn ban đầu: "${currentQuestion.explanation}". Đi sâu vào chi tiết, bối cảnh, hoặc các khái niệm khoa học liên quan. Sử dụng định dạng Markdown.`;try{const n=await e.generateContent(t);return n.response.text()}catch(n){return console.error("Lỗi khi tạo giải thích chi tiết:",n),null}}
+        
+        window.openLearnMoreModal=async()=>{
+            domElements.learnMoreModal.classList.add("active");
+            domElements.modalContentArea.innerHTML="";
+            domElements.modalSpinner.style.display="flex";
+            const e=await generateDetailedExplanation(selectedLevel);
+            domElements.modalSpinner.style.display="none";
+            if(e){
+                domElements.modalContentArea.innerHTML=marked.parse(e)
+            } else {
+                domElements.modalContentArea.innerHTML=`\n                    <div class="text-center">\n                        <p class="text-red-500 font-semibold">Rất tiếc, không thể tạo nội dung.</p>\n                        <p class="text-sm text-slate-500 dark:text-slate-400 mt-1">Đã có lỗi xảy ra trong quá trình xử lý. Vui lòng thử lại.</p>\n                        <button onclick="openLearnMoreModal()" class="mt-4 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 text-sm font-semibold">\n                            Thử lại\n                        </button>\n                    </div>\n                `
+            }
+        };
+        async function generateDetailedExplanation(level){
+            if(!textModel||!currentQuestion) return null;
+            
+            let levelInstruction = '';
+            switch(level) {
+                case 'easy':
+                    levelInstruction = 'Hãy giải thích như đang nói với một đứa trẻ 8 tuổi. Dùng từ ngữ cực kỳ đơn giản, các câu ngắn gọn, và các ví dụ gần gũi, dễ hình dung. Tránh mọi thuật ngữ phức tạp.';
+                    break;
+                case 'hard':
+                    levelInstruction = 'Hãy đi sâu vào các chi tiết kỹ thuật, các thuật ngữ chuyên ngành, và các bối cảnh lịch sử hoặc khoa học phức tạp liên quan.';
+                    break;
+                default:
+                    levelInstruction = 'Hãy giải thích một cách rõ ràng, mạch lạc cho đối tượng phổ thông, cung cấp thêm các thông tin thú vị và mở rộng kiến thức.';
+                    break;
+            }
+
+            const chatModel = getGenerativeModel(getAI(app,{backend:new GoogleAIBackend}),{model:"gemini-2.5-flash"});
+            const prompt = `Hãy đóng vai một chuyên gia uyên bác. Dựa trên phát biểu sau: "${currentQuestion.statement}", hãy cung cấp một bài giải thích chi tiết, sâu sắc và thú vị bằng tiếng Việt. ${levelInstruction} Mở rộng từ lời giải thích ngắn gọn ban đầu: "${currentQuestion.explanation}". Sử dụng định dạng Markdown.`;
+            try{
+                const result = await chatModel.generateContent(prompt);
+                return result.response.text()
+            }catch(n){
+                return console.error("Lỗi khi tạo giải thích chi tiết:",n),null
+            }
+        }
         window.closeLearnMoreModal = () => domElements.learnMoreModal.classList.remove('active');
 
         init();
