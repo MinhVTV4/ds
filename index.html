@@ -121,7 +121,8 @@
         import { initializeApp } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-app.js";
         import { getAI, getGenerativeModel, GoogleAIBackend } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-ai.js";
         import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-auth.js";
-        import { getFirestore, collection, addDoc, getDocs, query, where, doc, setDoc, serverTimestamp, limit } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-firestore.js";
+        // **NÂNG CẤP**: Thêm 'documentId' để truy vấn mạnh mẽ hơn
+        import { getFirestore, collection, addDoc, getDocs, query, where, doc, setDoc, serverTimestamp, limit, documentId } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-firestore.js";
 
         const firebaseConfig = {
             apiKey: "AIzaSyDQj9JpV0w3fbfLXWqEaeJ2QkAnnMyeCwU",
@@ -140,7 +141,7 @@
         const createQuizTool = { functionDeclarations: [{ name: "create_quiz_question", description: "Tạo một câu đố 'Sự thật hay Hư cấu' (Fact or Fiction).", parameters: { type: "OBJECT", properties: { statement: { type: "STRING", description: "Phát biểu của câu đố, để người dùng xác định là đúng hay sai." }, answer: { type: "BOOLEAN", description: "Đáp án đúng, true cho 'Sự thật', false cho 'Hư cấu'." }, explanation: { type: "STRING", description: "Một lời giải thích chi tiết khoảng 2-3 câu, cung cấp bối cảnh và thông tin thú vị liên quan. Sử dụng Markdown đơn giản để định dạng." }, image_prompt: { type: "STRING", description: "Một mô tả ngắn gọn, nghệ thuật bằng tiếng Anh để AI tạo hình ảnh minh họa." } }, required: ["statement", "answer", "explanation", "image_prompt"] } }] };
         try {
             const ai = getAI(app, { backend: new GoogleAIBackend() });
-            textModel = getGenerativeModel(ai, { model: "gemini-2.0-flash-lite", tools: createQuizTool, toolConfig: { functionCallingConfig: { mode: "ANY" } } });
+            textModel = getGenerativeModel(ai, { model: "gemini-1.5-flash-latest", tools: createQuizTool, toolConfig: { functionCallingConfig: { mode: "ANY" } } });
         } catch (e) { console.error("Lỗi khi khởi tạo Text Model:", e); }
         
         const TOTAL_QUESTIONS_PER_GAME = 10;
@@ -163,7 +164,6 @@
         let currentQuestion = null;
         let selectedTopic = topics[0];
         let selectedLevel = 'medium';
-        // **NÂNG CẤP**: Theo dõi chủ đề con trong phiên chơi
         let sessionSubtopicsUsed = [];
 
         const domElements = {
@@ -206,7 +206,7 @@
             try {
                 const querySnapshot = await getDocs(historyCollectionRef);
                 querySnapshot.forEach(doc => userHistory.push(doc.id));
-                console.log("Lịch sử người dùng đã tải:", userHistory);
+                console.log(`Lịch sử người dùng đã tải: ${userHistory.length} câu.`);
             } catch (error) {
                 console.error("Lỗi khi tải lịch sử người dùng:", error);
             }
@@ -217,37 +217,71 @@
             const historyDocRef = doc(db, 'users', userId, 'gameHistory', questionId);
             try {
                 await setDoc(historyDocRef, { playedAt: serverTimestamp() });
-                userHistory.push(questionId);
+                if (!userHistory.includes(questionId)) {
+                    userHistory.push(questionId);
+                }
             } catch (error) {
                 console.error("Lỗi khi cập nhật lịch sử người dùng:", error);
             }
         }
+        
+        // **NÂNG CẤP**: Hàm tạo ID ngẫu nhiên cho truy vấn
+        function generateRandomId() {
+            const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+            let result = '';
+            for (let i = 0; i < 20; i++) {
+                result += chars.charAt(Math.floor(Math.random() * chars.length));
+            }
+            return result;
+        }
 
-        // **NÂNG CẤP**: Tìm câu hỏi theo chủ đề con
+        // **NÂNG CẤP**: Truy vấn thông minh và chính xác trên Firestore
         async function getQuestionFromCache(topic, level, subtopic) {
-            const q = query(
-                collection(db, "questions"),
+            const randomId = generateRandomId();
+            // Firestore 'not-in' chỉ hỗ trợ tối đa 30 giá trị. Ta lấy 30 câu gần nhất.
+            const historyForQuery = userHistory.length > 0 ? userHistory.slice(-30) : ['placeholder'];
+
+            // Xây dựng các điều kiện truy vấn
+            let queryConstraints = [
                 where("topic", "==", topic.id),
                 where("level", "==", level),
-                where("subtopic", "==", subtopic), // Lọc theo chủ đề con
-                limit(30)
-            );
+                where("subtopic", "==", subtopic),
+                where(documentId(), ">=", randomId)
+            ];
+
+            if (userHistory.length > 0) {
+                queryConstraints.push(where(documentId(), "not-in", historyForQuery));
+            }
+            
+            let q = query(collection(db, "questions"), ...queryConstraints, limit(1));
+
             try {
-                const querySnapshot = await getDocs(q);
-                const potentialQuestions = [];
-                querySnapshot.forEach(doc => potentialQuestions.push({ id: doc.id, ...doc.data() }));
-                const unseenQuestions = potentialQuestions.filter(q => !userHistory.includes(q.id));
-                if (unseenQuestions.length > 0) {
-                    return unseenQuestions[Math.floor(Math.random() * unseenQuestions.length)];
+                // Thử truy vấn chính với điểm ngẫu nhiên
+                let querySnapshot = await getDocs(q);
+                if (!querySnapshot.empty) {
+                    const doc = querySnapshot.docs[0];
+                    return { id: doc.id, ...doc.data() };
                 }
-                return null;
+
+                // Nếu không tìm thấy, thử truy vấn phụ không có điểm ngẫu nhiên để quét toàn bộ
+                console.log("Cache miss với điểm ngẫu nhiên, thử truy vấn phụ...");
+                queryConstraints.splice(3, 1); // Bỏ điều kiện 'where(documentId(), ">=", randomId)'
+                q = query(collection(db, "questions"), ...queryConstraints, limit(1));
+                querySnapshot = await getDocs(q);
+
+                if (!querySnapshot.empty) {
+                    const doc = querySnapshot.docs[0];
+                    return { id: doc.id, ...doc.data() };
+                }
+                
+                return null; // Không tìm thấy câu hỏi phù hợp trong cache
+
             } catch (error) {
                 console.error("Lỗi khi lấy câu hỏi từ cache:", error);
                 return null;
             }
         }
 
-        // **NÂNG CẤP**: AI tạo câu hỏi theo chủ đề con được chỉ định
         async function generateWithAI(topic, level, subtopic) {
             let difficultyInstruction = '';
             switch(level) {
@@ -259,8 +293,13 @@
             const subtopicInstruction = `Hãy tập trung sâu vào khía cạnh sau: "${subtopic}".`;
             const historyContext = userHistory.length > 0 ? `Quan trọng: Câu hỏi mới phải hoàn toàn khác biệt, không được lặp lại ý tưởng hay kiến thức từ những câu đã có trong lịch sử.` : "Đây là câu hỏi đầu tiên.";
 
-            const prompt = `Hãy đóng vai một chuyên gia biên soạn nội dung... (Nội dung prompt không đổi, chỉ thay đổi cách truyền subtopic)`;
-            // (Full prompt content omitted for brevity, it's the same as before)
+            const prompt = `Hãy đóng vai một chuyên gia biên soạn nội dung cho một chương trình đố vui khoa học nổi tiếng. Nhiệm vụ của bạn là tạo một câu đố 'Sự thật hay Hư cấu' bằng tiếng Việt, đảm bảo tính chính xác, hấp dẫn và thách thức.
+Yêu cầu cụ thể:
+1.  Chủ đề chính: "${topic.prompt}".
+2.  ${subtopicInstruction}
+3.  Tuân thủ nghiêm ngặt độ khó sau: "${difficultyInstruction}".
+4.  Mỗi câu hỏi phải được kiểm chứng, chính xác và khai thác một khía cạnh độc đáo, một sự thật ít người biết hoặc một lầm tưởng tinh vi.
+5.  ${historyContext}`;
             
             try {
                 const result = await textModel.generateContent(prompt);
@@ -275,14 +314,13 @@
             }
         }
 
-        // **NÂNG CẤP**: Lưu câu hỏi với thông tin chủ đề con
         async function saveQuestionToCache(questionData, topic, level, subtopic) {
             try {
                 const docRef = await addDoc(collection(db, "questions"), {
                     ...questionData,
                     topic: topic.id,
                     level: level,
-                    subtopic: subtopic, // Lưu chủ đề con
+                    subtopic: subtopic,
                     createdAt: serverTimestamp()
                 });
                 return docRef.id;
@@ -292,30 +330,26 @@
             }
         }
         
-        // **NÂNG CẤP**: "Chiến lược tìm nạp thông minh"
         async function fetchNextQuestion() {
             showLoading(true);
             const currentTopic = selectedTopic.id === 'random' ? topics[Math.floor(Math.random() * (topics.length - 1)) + 1] : selectedTopic;
             
-            // 1. Chọn một chủ đề con chưa được dùng trong phiên này
             let availableSubtopics = currentTopic.subtopics.filter(st => !sessionSubtopicsUsed.includes(st));
             if (availableSubtopics.length === 0 && currentTopic.subtopics.length > 0) {
-                sessionSubtopicsUsed = []; // Reset nếu đã dùng hết
+                sessionSubtopicsUsed = []; 
                 availableSubtopics = currentTopic.subtopics;
             }
             
             const randomSubtopic = availableSubtopics.length > 0 ? availableSubtopics[Math.floor(Math.random() * availableSubtopics.length)] : 'general';
 
-            // 2. Thử lấy từ cache với chủ đề con đã chọn
             let question = await getQuestionFromCache(currentTopic, selectedLevel, randomSubtopic);
             if (question) {
-                console.log(`Tìm thấy câu hỏi trong cache cho chủ đề con: "${randomSubtopic}"`);
+                console.log(`Tìm thấy câu hỏi trong cache cho chủ đề con: "${randomSubtopic}" (ID: ${question.id})`);
                 sessionSubtopicsUsed.push(randomSubtopic);
                 showLoading(false);
                 return question;
             }
 
-            // 3. Nếu không có, tạo mới bằng AI
             console.log(`Không có câu hỏi cache cho "${randomSubtopic}", đang tạo mới...`);
             if (generationRetryCount > 4) {
                 domElements.questionText.textContent = "Lỗi khi tạo câu hỏi. Vui lòng thử lại.";
@@ -325,7 +359,6 @@
 
             const newQuestionData = await generateWithAI(currentTopic, selectedLevel, randomSubtopic);
             if (newQuestionData) {
-                // 4. Lưu câu hỏi mới vào cache với chủ đề con
                 const newId = await saveQuestionToCache(newQuestionData, currentTopic, selectedLevel, randomSubtopic);
                 if (newId) {
                     generationRetryCount = 0;
@@ -340,14 +373,13 @@
         }
         
         async function generateImage(prompt) {
-           /* Chức năng tạo ảnh đã bị vô hiệu hóa */
            domElements.imageContainer.style.display = 'none';
         }
 
         async function generateDetailedExplanation() {
              if (!textModel || !currentQuestion) return null;
-            const chatModel = getGenerativeModel(getAI(app, { backend: new GoogleAIBackend() }), { model: "gemini-2.0-flash-lite" });
-            const prompt = `Hãy đóng vai một chuyên gia uyên bác. Dựa trên phát biểu sau: "${currentQuestion.statement}", hãy cung cấp một bài giải thích chi tiết, sâu sắc và thú vị bằng tiếng Việt... (prompt không đổi)`;
+            const chatModel = getGenerativeModel(getAI(app, { backend: new GoogleAIBackend() }), { model: "gemini-1.5-flash-latest" });
+            const prompt = `Hãy đóng vai một chuyên gia uyên bác. Dựa trên phát biểu sau: "${currentQuestion.statement}", hãy cung cấp một bài giải thích chi tiết, sâu sắc và thú vị bằng tiếng Việt. Mở rộng từ lời giải thích ngắn gọn ban đầu: "${currentQuestion.explanation}". Đi sâu vào chi tiết, bối cảnh, hoặc các khái niệm khoa học liên quan. Sử dụng định dạng Markdown.`;
             try {
                 const result = await chatModel.generateContent(prompt);
                 return result.response.text();
@@ -396,7 +428,7 @@
         function startGame() {
             currentQuestionIndex = 0;
             score = 0;
-            sessionSubtopicsUsed = []; // Reset bộ đếm chủ đề con
+            sessionSubtopicsUsed = []; 
             updateScore();
             displayQuestion();
         }
