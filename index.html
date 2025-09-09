@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sự Thật hay Hư Cấu - AI Vision</title>
+    <title>Sự Thật hay Hư Cấu - AI Vision V1</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -153,7 +153,7 @@
         const createQuizTool = { functionDeclarations: [{ name: "create_quiz_question", description: "Tạo một câu đố 'Sự thật hay Hư cấu' (Fact or Fiction).", parameters: { type: "OBJECT", properties: { statement: { type: "STRING", description: "Phát biểu của câu đố, để người dùng xác định là đúng hay sai." }, answer: { type: "BOOLEAN", description: "Đáp án đúng, true cho 'Sự thật', false cho 'Hư cấu'." }, explanation: { type: "STRING", description: "Một lời giải thích chi tiết khoảng 2-3 câu, cung cấp bối cảnh và thông tin thú vị liên quan. Sử dụng Markdown đơn giản để định dạng." }, image_prompt: { type: "STRING", description: "Một mô tả ngắn gọn, nghệ thuật bằng tiếng Anh để AI tạo hình ảnh minh họa." } }, required: ["statement", "answer", "explanation", "image_prompt"] } }] };
         try {
             const ai = getAI(app, { backend: new GoogleAIBackend() });
-            textModel = getGenerativeModel(ai, { model: "gemini-2.0-flash-lite", tools: createQuizTool, toolConfig: { functionCallingConfig: { mode: "ANY" } } });
+            textModel = getGenerativeModel(ai, { model: "gemini-2.5-flash", tools: createQuizTool, toolConfig: { functionCallingConfig: { mode: "ANY" } } });
         } catch (e) { console.error("Lỗi khi khởi tạo Text Model:", e); }
         
         const TOTAL_QUESTIONS_PER_GAME = 10;
@@ -269,29 +269,45 @@
             let levelDescription = '';
             switch(level) {
                 case 'easy': levelDescription = 'dễ, phù hợp cho trẻ em 6-10 tuổi'; break;
-                case 'hard': levelDescription = 'khó, dành cho người có kiến thức chuyên sâu'; break;
+                case 'hard': levelDescription = 'khó, dành cho người có kiến thức chuyên sâu, có thể chứa thuật ngữ'; break;
                 default: levelDescription = 'phổ thông, phù hợp với mọi lứa tuổi'; break;
             }
+            
+            let specificPrompt = topic.prompt;
+            if (topic.subtopics && topic.subtopics.length > 0) {
+                const randomIndex = Math.floor(Math.random() * topic.subtopics.length);
+                specificPrompt = topic.subtopics[randomIndex];
+                console.log(`✨ AI được yêu cầu tạo câu hỏi về chủ đề con: "${specificPrompt}"`);
+            }
+
             const historyForAI = userHistory.map(h => h.split('_')[1]);
             const historyContext = historyForAI.length > 0 ? `5. **Tuyệt đối không** được lặp lại ý tưởng hay kiến thức từ những câu đã có trong lịch sử.` : "";
 
-            const prompt = `Hãy đóng vai một chuyên gia biên soạn nội dung cho một chương trình đố vui khoa học nổi tiếng. Nhiệm vụ của bạn là tạo ra một câu đố 'Sự thật hay Hư cấu' bằng tiếng Việt, đảm bảo tính chính xác, hấp dẫn, và thách thức ở mức độ ${levelDescription}.
+            const prompt = `Hãy đóng vai một chuyên gia biên soạn nội dung sáng tạo cho một game show kiến thức. Nhiệm vụ của bạn là tạo ra một câu đố 'Sự thật hay Hư cấu' bằng tiếng Việt, đảm bảo tính chính xác, hấp dẫn, và thách thức ở mức độ ${levelDescription}.
 
-**Quy tắc bắt buộc:**
-1.  **Tránh xa những sự thật quá hiển nhiên, ai cũng biết** (ví dụ: Trái đất hình cầu, nước sôi ở 100 độ C).
-2.  Nếu câu trả lời là **"Hư cấu"**, phát biểu phải được xây dựng dựa trên một lầm tưởng phổ biến hoặc một sự thật bị bóp méo đi một chi tiết nhỏ nhưng quan trọng, khiến nó nghe cực kỳ hợp lý nhưng lại sai.
-3.  Nếu câu trả lời là **"Sự thật"**, phát biểu phải đề cập đến một sự thật gây ngạc nhiên, khó tin, hoặc trái với trực giác thông thường của đa số mọi người.
-4.  Chủ đề chính: "${topic.prompt}".
-${historyContext}`;
-            
+**Quy tắc VÀNG (bắt buộc tuân thủ):**
+1.  **KHAI THÁC GÓC NHÌN MỚI**: Tránh xa những sự thật quá hiển nhiên, ai cũng biết. Hãy tìm những chi tiết ít người biết đến, gây ngạc nhiên hoặc phá vỡ những lầm tưởng phổ biến.
+2.  **CHỦ ĐỀ CỤ THỂ**: Tập trung hoàn toàn vào chủ đề sau: "${specificPrompt}". Mọi chi tiết trong câu hỏi phải liên quan trực tiếp đến chủ đề này.
+3.  **TẠO CÂU "HƯ CẤU" TINH VI**: Nếu câu trả lời là "Hư cấu", phát biểu phải nghe cực kỳ hợp lý, dựa trên một sự thật bị bóp méo hoặc một chi tiết sai lệch nhỏ nhưng quan trọng.
+4.  **TẠO CÂU "SỰ THẬT" GÂY SỐC**: Nếu câu trả lời là "Sự thật", phát biểu phải đề cập đến một sự thật khó tin, trái với trực giác thông thường.
+${historyContext}
+
+Hãy sáng tạo để người chơi phải thực sự suy nghĩ!`;
+
             try {
                 const result = await textModel.generateContent(prompt);
                 const functionCalls = result.response.functionCalls();
-                if (functionCalls && functionCalls[0]?.name === "create_quiz_question") return functionCalls[0].args;
+                if (functionCalls && functionCalls[0]?.name === "create_quiz_question") {
+                    return functionCalls[0].args;
+                }
+                console.error("AI không gọi hàm create_quiz_question. Phản hồi của AI:", result.response.text());
                 throw new Error("AI không gọi hàm.");
-            } catch (error) { console.error("Lỗi khi AI tạo câu hỏi:", error); return null; }
+            } catch (error) {
+                console.error("Lỗi khi AI tạo câu hỏi:", error);
+                return null;
+            }
         }
-        
+
         async function saveQuestionToCache(questionData, topic, level) {
             const collectionName = `${topic.id}_questions`;
             try {
@@ -328,21 +344,26 @@ ${historyContext}`;
             showLoading(true);
             const currentTopic = selectedTopic.id === 'random' ? topics[Math.floor(Math.random() * (topics.length - 1)) + 1] : selectedTopic;
             
-            const countKey = `${currentTopic.id}_${selectedLevel}`;
-            const currentCount = questionCounts[countKey] || 0;
-
-            if (currentCount < PIONEER_THRESHOLD) {
-                const question = await generateUniqueAIQuestion(currentTopic, selectedLevel);
-                 if (question) {
-                     showLoading(false);
-                     return question;
-                 }
-                 console.warn("Không thể tạo câu hỏi độc nhất, chuyển về chế độ Kế Thừa.");
-            }
-            
             const allAvailableIds = await getAvailableQuestionIds(currentTopic, selectedLevel);
             const playedIdsForTopic = userHistory.filter(id => id.startsWith(`${currentTopic.id}_`)).map(id => id.split('_')[1]);
             const unseenIds = allAvailableIds.filter(id => !playedIdsForTopic.includes(id));
+
+            const isCacheExhausted = unseenIds.length === 0 && allAvailableIds.length > 0;
+
+            const countKey = `${currentTopic.id}_${selectedLevel}`;
+            const currentCount = questionCounts[countKey] || 0;
+
+            if (currentCount < PIONEER_THRESHOLD || isCacheExhausted) {
+                if (isCacheExhausted) {
+                    console.log("Kích hoạt chế độ Tiên Phong: Cache đã được sử dụng hết!");
+                }
+                const question = await generateUniqueAIQuestion(currentTopic, selectedLevel);
+                if (question) {
+                    showLoading(false);
+                    return question;
+                }
+                console.warn("AI tạo câu hỏi thất bại, thử fallback về cache.");
+            }
             
             if (unseenIds.length > 0) {
                 const randomId = unseenIds[Math.floor(Math.random() * unseenIds.length)];
@@ -355,10 +376,11 @@ ${historyContext}`;
                 }
             }
             
-            const question = await generateUniqueAIQuestion(currentTopic, selectedLevel);
-            if(question) {
+            console.warn("Mọi phương thức đều thất bại, thử gọi AI lần cuối.");
+            const lastResortQuestion = await generateUniqueAIQuestion(currentTopic, selectedLevel);
+            if(lastResortQuestion) {
                 showLoading(false);
-                return question;
+                return lastResortQuestion;
             }
 
             domElements.questionText.textContent = "Không thể tải câu hỏi. Vui lòng thử lại.";
@@ -398,12 +420,14 @@ ${historyContext}`;
                 updateUserHistory(currentQuestion.id, currentQuestion.topicId);
             }
         }
+
         function startGame() {
             currentQuestionIndex = 0;
             score = 0;
             updateScore();
             displayQuestion();
         }
+
         function initAuth() {
             onAuthStateChanged(auth, async (user) => {
                 if (user) {
@@ -424,6 +448,7 @@ ${historyContext}`;
                 domElements.authLoadingOverlay.style.display = 'none';
             });
         }
+
         function init() {
             topics.forEach(topic => {
                 const button = document.createElement('button');
@@ -451,7 +476,13 @@ ${historyContext}`;
             domElements.levelSelectionScreen.style.display = 'none';
             domElements.topicSelectionScreen.style.display = 'block';
         };
-        window.selectTopic = (id) => { selectedTopic = topics.find(t => t.id === id); domElements.topicSelectionScreen.style.display = 'none'; domElements.levelSelectionScreen.style.display = 'block'; };
+
+        window.selectTopic = (id) => { 
+            selectedTopic = topics.find(t => t.id === id); 
+            domElements.topicSelectionScreen.style.display = 'none'; 
+            domElements.levelSelectionScreen.style.display = 'block'; 
+        };
+
         window.selectLevel = (level) => { 
             selectedLevel = level; 
             domElements.startScreen.style.display = 'none'; 
@@ -459,28 +490,92 @@ ${historyContext}`;
             domElements.gameTitle.textContent = `Chủ đề: ${selectedTopic.name} - ${levelNames[level]}`; 
             startGame(); 
         };
-        window.backToTopicSelection = () => { domElements.levelSelectionScreen.style.display = 'none'; domElements.topicSelectionScreen.style.display = 'block'; };
-        window.resetGame = function() { domElements.finalScoreScreen.style.display = 'none'; backToMenu(); };
-        window.checkAnswer = function(userAnswer){if(!currentQuestion)return;domElements.trueBtn.style.display='none';domElements.falseBtn.style.display='none';domElements.nextBtn.style.display='block';const t=currentQuestion.answer===userAnswer;t?(score++,domElements.questionCard.classList.add("feedback-correct")):domElements.questionCard.classList.add("feedback-incorrect"),updateScore(),showExplanation()};
-        window.goToNextQuestion = function(){currentQuestionIndex++,currentQuestionIndex<TOTAL_QUESTIONS_PER_GAME?displayQuestion():showFinalScore()};
-        function showExplanation(){const e=currentQuestion.answer===!0?"### ✅ Đúng vậy, đó là Sự thật!":"### ❌ Chính xác, đó là Hư cấu!",t=`${e}\n\n${currentQuestion.explanation}`;domElements.explanationContent.innerHTML=marked.parse(t),domElements.explanationContainer.style.display="block"}
-        function updateScore(){domElements.scoreText.innerHTML=`Điểm: ${score}`}
-        function showFinalScore(){domElements.gameUI.style.display="none",domElements.finalScoreScreen.style.display="block",domElements.finalScoreText.textContent=score;let e="Cố gắng hơn nhé! Còn nhiều điều thú vị để khám phá.";const t=score/TOTAL_QUESTIONS_PER_GAME*100;100===t?e="Tuyệt vời! Bạn là một bậc thầy sự thật!":t>=75?e="Làm tốt lắm! Kiến thức của bạn thật đáng nể.":t>=50&&(e="Không tệ! Bạn đã phân biệt được khá nhiều sự thật."),domElements.finalMessage.textContent=e}
+
+        window.backToTopicSelection = () => { 
+            domElements.levelSelectionScreen.style.display = 'none'; 
+            domElements.topicSelectionScreen.style.display = 'block'; 
+        };
+
+        window.resetGame = function() { 
+            domElements.finalScoreScreen.style.display = 'none'; 
+            backToMenu(); 
+        };
+
+        window.checkAnswer = function(userAnswer) {
+            if (!currentQuestion) return;
+            domElements.trueBtn.style.display = 'none';
+            domElements.falseBtn.style.display = 'none';
+            domElements.nextBtn.style.display = 'block';
+            const isCorrect = currentQuestion.answer === userAnswer;
+            if (isCorrect) {
+                score++;
+                domElements.questionCard.classList.add("feedback-correct");
+            } else {
+                domElements.questionCard.classList.add("feedback-incorrect");
+            }
+            updateScore();
+            showExplanation();
+        };
+
+        window.goToNextQuestion = function() {
+            currentQuestionIndex++;
+            if (currentQuestionIndex < TOTAL_QUESTIONS_PER_GAME) {
+                displayQuestion();
+            } else {
+                showFinalScore();
+            }
+        };
+
+        function showExplanation() {
+            const prefix = currentQuestion.answer === true ? "### ✅ Đúng vậy, đó là Sự thật!" : "### ❌ Chính xác, đó là Hư cấu!";
+            const fullExplanation = `${prefix}\n\n${currentQuestion.explanation}`;
+            domElements.explanationContent.innerHTML = marked.parse(fullExplanation);
+            domElements.explanationContainer.style.display = "block";
+        }
+
+        function updateScore() {
+            domElements.scoreText.innerHTML = `Điểm: ${score}`;
+        }
+
+        function showFinalScore() {
+            domElements.gameUI.style.display = "none";
+            domElements.finalScoreScreen.style.display = "block";
+            domElements.finalScoreText.textContent = score;
+            let message = "Cố gắng hơn nhé! Còn nhiều điều thú vị để khám phá.";
+            const percentage = (score / TOTAL_QUESTIONS_PER_GAME) * 100;
+            if (percentage === 100) {
+                message = "Tuyệt vời! Bạn là một bậc thầy sự thật!";
+            } else if (percentage >= 75) {
+                message = "Làm tốt lắm! Kiến thức của bạn thật đáng nể.";
+            } else if (percentage >= 50) {
+                message = "Không tệ! Bạn đã phân biệt được khá nhiều sự thật.";
+            }
+            domElements.finalMessage.textContent = message;
+        }
         
         window.openLearnMoreModal=async()=>{
             domElements.learnMoreModal.classList.add("active");
             domElements.modalContentArea.innerHTML="";
             domElements.modalSpinner.style.display="flex";
-            const e=await generateDetailedExplanation(selectedLevel);
+            const detailedExplanation = await generateDetailedExplanation(selectedLevel);
             domElements.modalSpinner.style.display="none";
-            if(e){
-                domElements.modalContentArea.innerHTML=marked.parse(e)
+            if(detailedExplanation){
+                domElements.modalContentArea.innerHTML=marked.parse(detailedExplanation)
             } else {
-                domElements.modalContentArea.innerHTML=`\n                    <div class="text-center">\n                        <p class="text-red-500 font-semibold">Rất tiếc, không thể tạo nội dung.</p>\n                        <p class="text-sm text-slate-500 dark:text-slate-400 mt-1">Đã có lỗi xảy ra trong quá trình xử lý. Vui lòng thử lại.</p>\n                        <button onclick="openLearnMoreModal()" class="mt-4 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 text-sm font-semibold">\n                            Thử lại\n                        </button>\n                    </div>\n                `
+                domElements.modalContentArea.innerHTML=`
+                    <div class="text-center">
+                        <p class="text-red-500 font-semibold">Rất tiếc, không thể tạo nội dung.</p>
+                        <p class="text-sm text-slate-500 dark:text-slate-400 mt-1">Đã có lỗi xảy ra trong quá trình xử lý. Vui lòng thử lại.</p>
+                        <button onclick="openLearnMoreModal()" class="mt-4 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 text-sm font-semibold">
+                            Thử lại
+                        </button>
+                    </div>
+                `;
             }
         };
-        async function generateDetailedExplanation(level){
-            if(!textModel||!currentQuestion) return null;
+
+        async function generateDetailedExplanation(level) {
+            if (!textModel || !currentQuestion) return null;
             
             let levelInstruction = '';
             switch(level) {
@@ -495,13 +590,14 @@ ${historyContext}`;
                     break;
             }
 
-            const chatModel = getGenerativeModel(getAI(app,{backend:new GoogleAIBackend}),{model:"gemini-2.0-flash-lite"});
+            const chatModel = getGenerativeModel(getAI(app,{backend:new GoogleAIBackend}),{model:"gemini-2.5-flash"});
             const prompt = `Hãy đóng vai một chuyên gia uyên bác. Dựa trên phát biểu sau: "${currentQuestion.statement}", hãy cung cấp một bài giải thích chi tiết, sâu sắc và thú vị bằng tiếng Việt. ${levelInstruction} Mở rộng từ lời giải thích ngắn gọn ban đầu: "${currentQuestion.explanation}". Sử dụng định dạng Markdown.`;
-            try{
+            try {
                 const result = await chatModel.generateContent(prompt);
-                return result.response.text()
-            }catch(n){
-                return console.error("Lỗi khi tạo giải thích chi tiết:",n),null
+                return result.response.text();
+            } catch(error) {
+                console.error("Lỗi khi tạo giải thích chi tiết:", error);
+                return null;
             }
         }
         window.closeLearnMoreModal = () => domElements.learnMoreModal.classList.remove('active');
